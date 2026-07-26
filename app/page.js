@@ -743,7 +743,7 @@ function NavBar({ tabs, active, onChange, variant }) {
 // FIXTURES TAB
 // =====================================================================
 
-function MatchCard({ match, prediction, locked, onSave, saving }) {
+function MatchCard({ match, prediction, locked, canSave, onSave, saving }) {
   const [home, setHome] = useState(prediction ? prediction.home_score : 1);
   const [away, setAway] = useState(prediction ? prediction.away_score : 1);
   const [stake, setStake] = useState(prediction ? prediction.stake : 20);
@@ -793,6 +793,10 @@ function MatchCard({ match, prediction, locked, onSave, saving }) {
               Your pick: {prediction.home_score}-{prediction.away_score} (stake {prediction.stake})
             </div>
           )}
+        </div>
+      ) : !canSave ? (
+        <div style={{ textAlign: 'center' }}>
+          <Badge tone="default">Opt in above to save picks</Badge>
         </div>
       ) : (
         <Button
@@ -897,6 +901,10 @@ function FixturesTab({ profile }) {
   };
 
   const savePick = async (match, pick) => {
+    if (!optedIn) {
+      setMsg("Error: Opt in to this Gameweek above before saving picks.");
+      return;
+    }
     setSavingId(match.id);
     setMsg('');
     const payload = {
@@ -950,7 +958,10 @@ function FixturesTab({ profile }) {
       <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <div style={{ fontWeight: 700, marginBottom: 2 }}>I am playing this Gameweek</div>
-          <div style={st.sub}>Opt in so your picks count towards Gameweek {selectedGw}'s results and leaderboard.</div>
+          <div style={st.sub}>
+            Opt in to save picks for Gameweek {selectedGw} — your picks won't count towards results or the leaderboard
+            otherwise.
+          </div>
         </div>
         <ToggleSwitch checked={optedIn} disabled={optInBusy || locked} onChange={toggleOptIn} />
       </div>
@@ -963,6 +974,7 @@ function FixturesTab({ profile }) {
           match={m}
           prediction={predictions[m.id]}
           locked={locked}
+          canSave={optedIn}
           saving={savingId === m.id}
           onSave={savePick}
         />

@@ -139,6 +139,20 @@ as $$
   select now() >= ((select min(kickoff) from public.matches where gameweek = gw) - interval '1 hour');
 $$;
 
+-- Has the current user opted in ("I am playing this Gameweek") to gw?
+create or replace function public.opted_in(gw int)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.gameweek_entries
+    where user_id = auth.uid() and gameweek = gw
+  );
+$$;
+
 -- Pre-season picks lock 1 hour before the very first match of the season.
 create or replace function public.preseason_locked()
 returns boolean
@@ -265,6 +279,8 @@ create policy "predictions_select" on public.predictions
   for select to authenticated
   using (user_id = auth.uid() or public.gameweek_locked(gameweek) or public.is_admin());
 
+-- A user must have opted in to a gameweek ("I am playing this Gameweek")
+-- before they can save predictions for it.
 drop policy if exists "predictions_insert" on public.predictions;
 create policy "predictions_insert" on public.predictions
   for insert to authenticated
@@ -272,6 +288,7 @@ create policy "predictions_insert" on public.predictions
     user_id = auth.uid()
     and gameweek = public.match_gameweek(match_id)
     and not public.gameweek_locked(public.match_gameweek(match_id))
+    and public.opted_in(public.match_gameweek(match_id))
   );
 
 drop policy if exists "predictions_update" on public.predictions;
@@ -282,6 +299,7 @@ create policy "predictions_update" on public.predictions
     user_id = auth.uid()
     and gameweek = public.match_gameweek(match_id)
     and not public.gameweek_locked(public.match_gameweek(match_id))
+    and public.opted_in(public.match_gameweek(match_id))
   );
 
 -- tournament_predictions: same shape, locked by kickoff of the season.
