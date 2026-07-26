@@ -332,6 +332,43 @@ function StakeSelector({ value, onChange, disabled }) {
   );
 }
 
+function ToggleSwitch({ checked, onChange, disabled }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onChange}
+      style={{
+        width: 50,
+        height: 30,
+        borderRadius: 999,
+        border: `1px solid ${checked ? C.accent : C.border}`,
+        background: checked ? 'rgba(0,208,132,0.25)' : C.bg2,
+        position: 'relative',
+        padding: 0,
+        flexShrink: 0,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 3,
+          left: checked ? 22 : 3,
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          background: checked ? C.accent : C.sub,
+          transition: 'left 0.15s ease',
+        }}
+      />
+    </button>
+  );
+}
+
 // =====================================================================
 // AUTH SCREEN
 // =====================================================================
@@ -355,6 +392,12 @@ function AuthScreen() {
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+      } else if (mode === 'forgot') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin,
+        });
+        if (error) throw error;
+        setInfo('If an account exists for that email, a password reset link has been sent.');
       } else {
         if (!username.trim()) throw new Error('Please choose a username.');
         if (password.length < 6) throw new Error('Password must be at least 6 characters.');
@@ -388,36 +431,46 @@ function AuthScreen() {
         <div style={{ textAlign: 'center', marginBottom: 22 }}>
           <div style={{ fontSize: 34, marginBottom: 4 }}>⚽</div>
           <div style={{ fontSize: 24, fontWeight: 800 }}>PL Predictor</div>
-          <div style={st.sub}>2026/27 Premier League prediction league</div>
+          <div style={st.sub}>
+            {mode === 'forgot' ? 'Reset your password' : '2026/27 Premier League prediction league'}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', background: C.card, borderRadius: 12, padding: 4, marginBottom: 18, border: `1px solid ${C.border}` }}>
-          {['login', 'register'].map((m) => (
-            <button
-              key={m}
-              onClick={() => {
-                setMode(m);
-                setError('');
-                setInfo('');
-              }}
-              style={{
-                flex: 1,
-                minHeight: 44,
-                borderRadius: 9,
-                fontWeight: 700,
-                fontSize: 14,
-                border: 'none',
-                background: mode === m ? C.accent : 'transparent',
-                color: mode === m ? '#04140d' : C.sub,
-              }}
-            >
-              {m === 'login' ? 'Log In' : 'Register'}
-            </button>
-          ))}
-        </div>
+        {mode !== 'forgot' && (
+          <div style={{ display: 'flex', background: C.card, borderRadius: 12, padding: 4, marginBottom: 18, border: `1px solid ${C.border}` }}>
+            {['login', 'register'].map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setMode(m);
+                  setError('');
+                  setInfo('');
+                }}
+                style={{
+                  flex: 1,
+                  minHeight: 44,
+                  borderRadius: 9,
+                  fontWeight: 700,
+                  fontSize: 14,
+                  border: 'none',
+                  background: mode === m ? C.accent : 'transparent',
+                  color: mode === m ? '#04140d' : C.sub,
+                }}
+              >
+                {m === 'login' ? 'Log In' : 'Register'}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && <div style={st.errorBox}>{error}</div>}
         {info && <div style={st.okBox}>{info}</div>}
+
+        {mode === 'forgot' && !info && (
+          <div style={{ ...st.sub, marginBottom: 16 }}>
+            Enter the email address on your account and we'll send you a link to reset your password.
+          </div>
+        )}
 
         <form onSubmit={submit}>
           {mode === 'register' && (
@@ -437,16 +490,42 @@ function AuthScreen() {
               required
             />
           </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={st.label}>Password</label>
-            <input
-              style={st.input}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+          {mode !== 'forgot' && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={st.label}>Password</label>
+              <input
+                style={st.input}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+          )}
+          {mode === 'login' && (
+            <div style={{ textAlign: 'right', marginTop: -4, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('forgot');
+                  setError('');
+                  setInfo('');
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: C.sub,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: 'underline',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
           {mode === 'register' && (
             <div style={{ marginBottom: 16 }}>
               <label style={st.label}>Invite Code</label>
@@ -460,7 +539,110 @@ function AuthScreen() {
             </div>
           )}
           <Button type="submit" fullWidth disabled={busy}>
-            {busy ? 'Please wait…' : mode === 'login' ? 'Log In' : 'Create Account'}
+            {busy
+              ? 'Please wait…'
+              : mode === 'login'
+              ? 'Log In'
+              : mode === 'forgot'
+              ? 'Send Reset Link'
+              : 'Create Account'}
+          </Button>
+        </form>
+
+        {mode === 'forgot' && (
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setError('');
+                setInfo('');
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: C.accent,
+                fontSize: 13.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              ← Back to Log In
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setInfo('');
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setInfo('Password updated! Taking you back to the app…');
+      setTimeout(() => onDone(), 1200);
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ ...st.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 380, padding: 20 }}>
+        <div style={{ textAlign: 'center', marginBottom: 22 }}>
+          <div style={{ fontSize: 34, marginBottom: 4 }}>🔒</div>
+          <div style={{ fontSize: 24, fontWeight: 800 }}>Set a New Password</div>
+          <div style={st.sub}>Choose a new password for your account.</div>
+        </div>
+
+        {error && <div style={st.errorBox}>{error}</div>}
+        {info && <div style={st.okBox}>{info}</div>}
+
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={st.label}>New Password</label>
+            <input
+              style={st.input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={st.label}>Confirm New Password</label>
+            <input
+              style={st.input}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" fullWidth disabled={busy}>
+            {busy ? 'Please wait…' : 'Set Password'}
           </Button>
         </form>
       </div>
@@ -628,12 +810,17 @@ function MatchCard({ match, prediction, locked, onSave, saving }) {
   );
 }
 
+const ALL_GAMEWEEKS = Array.from({ length: 38 }, (_, i) => i + 1);
+
 function FixturesTab({ profile }) {
   const [matches, setMatches] = useState([]);
   const [predictions, setPredictions] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [msg, setMsg] = useState('');
+  const [selectedGw, setSelectedGw] = useState(null);
+  const [optedIn, setOptedIn] = useState(false);
+  const [optInBusy, setOptInBusy] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -647,15 +834,26 @@ function FixturesTab({ profile }) {
   }, [loadAll]);
 
   const currentGw = useMemo(() => getCurrentGameweek(matches), [matches]);
+
+  useEffect(() => {
+    if (selectedGw == null && matches.length) setSelectedGw(currentGw);
+  }, [currentGw, matches, selectedGw]);
+
   const gwMatches = useMemo(
-    () => matches.filter((m) => m.gameweek === currentGw).sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff)),
-    [matches, currentGw]
+    () =>
+      selectedGw == null
+        ? []
+        : matches.filter((m) => m.gameweek === selectedGw).sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff)),
+    [matches, selectedGw]
   );
-  const lockTime = useMemo(() => gameweekLockTime(matches, currentGw), [matches, currentGw]);
+  const lockTime = useMemo(() => (selectedGw == null ? null : gameweekLockTime(matches, selectedGw)), [matches, selectedGw]);
   const locked = isPast(lockTime);
 
   useEffect(() => {
-    if (!gwMatches.length || !profile) return;
+    if (!gwMatches.length || !profile) {
+      setPredictions({});
+      return;
+    }
     (async () => {
       const ids = gwMatches.map((m) => m.id);
       const { data } = await supabase.from('predictions').select('*').eq('user_id', profile.id).in('match_id', ids);
@@ -665,10 +863,42 @@ function FixturesTab({ profile }) {
     })();
   }, [gwMatches, profile]);
 
+  useEffect(() => {
+    if (selectedGw == null || !profile) return;
+    (async () => {
+      const { data } = await supabase
+        .from('gameweek_entries')
+        .select('gameweek')
+        .eq('user_id', profile.id)
+        .eq('gameweek', selectedGw)
+        .maybeSingle();
+      setOptedIn(!!data);
+    })();
+  }, [selectedGw, profile]);
+
+  const toggleOptIn = async () => {
+    if (!profile || selectedGw == null) return;
+    setOptInBusy(true);
+    setMsg('');
+    if (optedIn) {
+      const { error } = await supabase
+        .from('gameweek_entries')
+        .delete()
+        .eq('user_id', profile.id)
+        .eq('gameweek', selectedGw);
+      if (error) setMsg(`Error: ${error.message}`);
+      else setOptedIn(false);
+    } else {
+      const { error } = await supabase.from('gameweek_entries').insert({ user_id: profile.id, gameweek: selectedGw });
+      if (error) setMsg(`Error: ${error.message}`);
+      else setOptedIn(true);
+    }
+    setOptInBusy(false);
+  };
+
   const savePick = async (match, pick) => {
     setSavingId(match.id);
     setMsg('');
-    const existing = predictions[match.id];
     const payload = {
       user_id: profile.id,
       match_id: match.id,
@@ -693,20 +923,40 @@ function FixturesTab({ profile }) {
     setSavingId(null);
   };
 
-  if (loading) return <Spinner />;
+  if (loading || selectedGw == null) return <Spinner />;
 
   return (
     <div>
+      <div style={{ marginBottom: 14 }}>
+        <select style={st.select} value={selectedGw} onChange={(e) => setSelectedGw(Number(e.target.value))}>
+          {ALL_GAMEWEEKS.map((gw) => (
+            <option key={gw} value={gw}>
+              Gameweek {gw}
+              {gw === currentGw ? ' (current)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <div style={st.h1}>Gameweek {currentGw}</div>
+        <div style={st.h1}>Gameweek {selectedGw}</div>
         <Badge tone={locked ? 'danger' : 'accent'}>{countdownText(lockTime)}</Badge>
       </div>
       <div style={{ ...st.sub, marginBottom: 16 }}>
         Pick a scoreline and a stake for every match. Exact score wins the full stake, correct result (win/draw/loss)
         wins half, wrong pays it back out of your total.
       </div>
+
+      <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>I am playing this Gameweek</div>
+          <div style={st.sub}>Opt in so your picks count towards Gameweek {selectedGw}'s results and leaderboard.</div>
+        </div>
+        <ToggleSwitch checked={optedIn} disabled={optInBusy || locked} onChange={toggleOptIn} />
+      </div>
+
       {msg && <div style={msg.startsWith('Error') ? st.errorBox : st.okBox}>{msg}</div>}
-      {!gwMatches.length && <div style={st.sub}>No fixtures found yet — ask the admin to seed the schedule.</div>}
+      {!gwMatches.length && <div style={st.sub}>No fixtures scheduled for this gameweek yet.</div>}
       {gwMatches.map((m) => (
         <MatchCard
           key={m.id}
@@ -760,15 +1010,17 @@ function ResultsTab({ profile }) {
       setGwMatches(gm);
       const ids = gm.map((m) => m.id);
       if (ids.length) {
-        const [{ data: res }, { data: preds }, { data: profs }] = await Promise.all([
+        const [{ data: res }, { data: preds }, { data: profs }, { data: entries }] = await Promise.all([
           supabase.from('results').select('*').in('match_id', ids),
           supabase.from('predictions').select('*').in('match_id', ids),
           supabase.from('profiles').select('id, username'),
+          supabase.from('gameweek_entries').select('user_id').eq('gameweek', selectedGw),
         ]);
         const resMap = {};
         (res || []).forEach((r) => (resMap[r.match_id] = r));
         setResults(resMap);
-        setAllPreds(preds || []);
+        const optedInIds = new Set((entries || []).map((e) => e.user_id));
+        setAllPreds((preds || []).filter((p) => optedInIds.has(p.user_id)));
         const profMap = {};
         (profs || []).forEach((p) => (profMap[p.id] = p.username));
         setProfiles(profMap);
@@ -1538,6 +1790,58 @@ function AdminUsers({ session }) {
   );
 }
 
+function AdminGameweekOptIns() {
+  const [counts, setCounts] = useState({});
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const [{ data: entries }, { count }] = await Promise.all([
+        supabase.from('gameweek_entries').select('gameweek'),
+        supabase.from('profiles').select('id', { count: 'exact', head: true }),
+      ]);
+      const map = {};
+      (entries || []).forEach((e) => {
+        map[e.gameweek] = (map[e.gameweek] || 0) + 1;
+      });
+      setCounts(map);
+      setTotalUsers(count || 0);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      <div style={{ ...st.sub, marginBottom: 12 }}>
+        Players who have opted in ("I am playing this Gameweek") per gameweek, out of {totalUsers} total players.
+      </div>
+      <div style={st.card}>
+        {ALL_GAMEWEEKS.map((gw) => (
+          <div
+            key={gw}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '8px 0',
+              borderBottom: gw < 38 ? `1px solid ${C.border}` : 'none',
+            }}
+          >
+            <span style={{ fontWeight: 700 }}>Gameweek {gw}</span>
+            <Badge tone={counts[gw] ? 'accent' : 'default'}>
+              {counts[gw] || 0} / {totalUsers}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel({ session }) {
   const [sub, setSub] = useState('results');
   const [allMatches, setAllMatches] = useState([]);
@@ -1556,6 +1860,7 @@ function AdminPanel({ session }) {
     { key: 'matches', label: 'Edit Matches' },
     { key: 'points', label: 'Adjust Points' },
     { key: 'users', label: 'Users' },
+    { key: 'optins', label: 'Gameweek Opt-Ins' },
   ];
 
   return (
@@ -1586,6 +1891,113 @@ function AdminPanel({ session }) {
       {sub === 'matches' && <AdminEditMatches allMatches={allMatches} reload={loadMatches} />}
       {sub === 'points' && <AdminAdjustPoints allMatches={allMatches} reload={loadMatches} />}
       {sub === 'users' && <AdminUsers session={session} />}
+      {sub === 'optins' && <AdminGameweekOptIns />}
+    </div>
+  );
+}
+
+// =====================================================================
+// PROFILE
+// =====================================================================
+
+function ProfileTab({ profile, session }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    setInfo('');
+    if (newPassword.length < 6) {
+      setError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: session.user.email,
+        password: currentPassword,
+      });
+      if (verifyError) throw new Error('Current password is incorrect.');
+
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) throw updateError;
+
+      setInfo('Password updated successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={st.h1}>Profile</div>
+
+      <div style={st.card}>
+        <div style={st.h2}>Account</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={st.label}>Username</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{profile.username}</div>
+        </div>
+        <div>
+          <div style={st.label}>Email</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{session.user.email}</div>
+        </div>
+      </div>
+
+      <div style={st.card}>
+        <div style={st.h2}>Change Password</div>
+        {error && <div style={st.errorBox}>{error}</div>}
+        {info && <div style={st.okBox}>{info}</div>}
+        <form onSubmit={changePassword}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={st.label}>Current Password</label>
+            <input
+              style={st.input}
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={st.label}>New Password</label>
+            <input
+              style={st.input}
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+            />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={st.label}>Confirm New Password</label>
+            <input
+              style={st.input}
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" fullWidth disabled={busy}>
+            {busy ? 'Updating…' : 'Update Password'}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1600,6 +2012,7 @@ const BASE_TABS = [
   { key: 'preseason', label: 'Pre-Season Picks', shortLabel: 'Season', icon: '🏆' },
   { key: 'leaderboard', label: 'Leaderboard', shortLabel: 'Table', icon: '🥇' },
   { key: 'rules', label: 'Rules', shortLabel: 'Rules', icon: '📖' },
+  { key: 'profile', label: 'Profile', shortLabel: 'Profile', icon: '👤' },
 ];
 
 export default function Page() {
@@ -1607,11 +2020,13 @@ export default function Page() {
   const [profile, setProfile] = useState(null);
   const [activeTab, setActiveTab] = useState('fixtures');
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess);
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -1631,7 +2046,7 @@ export default function Page() {
         setProfile(data || null);
         setLoadingProfile(false);
       });
-  }, [session]);
+  }, [session?.user?.id]);
 
   if (session === undefined) {
     return (
@@ -1640,6 +2055,8 @@ export default function Page() {
       </div>
     );
   }
+
+  if (recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
 
   if (!session) return <AuthScreen />;
 
@@ -1675,6 +2092,7 @@ export default function Page() {
         {activeTab === 'preseason' && <PreSeasonTab profile={profile} />}
         {activeTab === 'leaderboard' && <LeaderboardTab profile={profile} />}
         {activeTab === 'rules' && <RulesTab />}
+        {activeTab === 'profile' && <ProfileTab profile={profile} session={session} />}
         {activeTab === 'admin' && profile.is_admin && <AdminPanel session={session} />}
       </div>
       <NavBar variant="bottom" tabs={tabs} active={activeTab} onChange={setActiveTab} />

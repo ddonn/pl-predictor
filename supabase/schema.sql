@@ -72,6 +72,19 @@ create table if not exists public.points_adjustments (
   created_at timestamptz not null default now()
 );
 
+-- A user's opt-in declaration ("I am playing this Gameweek") for a given
+-- gameweek. Presence of a row = opted in. Users not opted in to a
+-- gameweek are excluded from that gameweek's results view and leaderboard
+-- contribution (see get_leaderboard() and the app's ResultsTab).
+create table if not exists public.gameweek_entries (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  gameweek int not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, gameweek)
+);
+
+create index if not exists gameweek_entries_gameweek_idx on public.gameweek_entries (gameweek);
+
 -- =========================================================
 -- NEW-USER TRIGGER
 -- Reads username / is_admin out of the signUp() metadata payload
@@ -166,6 +179,7 @@ as $$
       ) as pts
     from public.predictions pr
     join public.results r on r.match_id = pr.match_id
+    join public.gameweek_entries ge on ge.user_id = pr.user_id and ge.gameweek = pr.gameweek
     group by pr.user_id
   ) mp on mp.user_id = p.id
   left join (
@@ -198,6 +212,7 @@ alter table public.predictions enable row level security;
 alter table public.tournament_predictions enable row level security;
 alter table public.tournament_results enable row level security;
 alter table public.points_adjustments enable row level security;
+alter table public.gameweek_entries enable row level security;
 
 -- profiles: anyone signed in can read usernames (needed for leaderboard /
 -- shared picks); a user can edit their own row, admins can edit anyone's.
@@ -302,3 +317,21 @@ create policy "points_adjustments_select" on public.points_adjustments
 drop policy if exists "points_adjustments_write" on public.points_adjustments;
 create policy "points_adjustments_write" on public.points_adjustments
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- gameweek_entries: everyone signed in can read entries (needed so
+-- Previous Results / the leaderboard RPC can exclude non-opted-in users,
+-- and so admins can see opt-in counts); a user manages their own opt-in
+-- while that gameweek is still open, admins can manage anyone's.
+drop policy if exists "gameweek_entries_select" on public.gameweek_entries;
+create policy "gameweek_entries_select" on public.gameweek_entries
+  for select to authenticated using (true);
+
+drop policy if exists "gameweek_entries_insert" on public.gameweek_entries;
+create policy "gameweek_entries_insert" on public.gameweek_entries
+  for insert to authenticated
+  with check ((user_id = auth.uid() and not public.gameweek_locked(gameweek)) or public.is_admin());
+
+drop policy if exists "gameweek_entries_delete" on public.gameweek_entries;
+create policy "gameweek_entries_delete" on public.gameweek_entries
+  for delete to authenticated
+  using ((user_id = auth.uid() and not public.gameweek_locked(gameweek)) or public.is_admin());
