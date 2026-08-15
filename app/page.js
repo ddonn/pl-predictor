@@ -329,43 +329,6 @@ function StakeSelector({ value, onChange, disabled, maxStake }) {
   );
 }
 
-function ToggleSwitch({ checked, onChange, disabled }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={onChange}
-      style={{
-        width: 50,
-        height: 30,
-        borderRadius: 999,
-        border: `1px solid ${checked ? C.accent : C.border}`,
-        background: checked ? 'rgba(0,208,132,0.25)' : C.bg2,
-        position: 'relative',
-        padding: 0,
-        flexShrink: 0,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <span
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: checked ? 22 : 3,
-          width: 22,
-          height: 22,
-          borderRadius: '50%',
-          background: checked ? C.accent : C.sub,
-          transition: 'left 0.15s ease',
-        }}
-      />
-    </button>
-  );
-}
-
 // =====================================================================
 // AUTH SCREEN
 // =====================================================================
@@ -740,7 +703,7 @@ function NavBar({ tabs, active, onChange, variant }) {
 // FIXTURES TAB
 // =====================================================================
 
-function MatchCard({ match, prediction, locked, canSave, onSave, saving, maxStake }) {
+function MatchCard({ match, prediction, locked, onSave, saving, maxStake }) {
   const [home, setHome] = useState(prediction ? prediction.home_score : 1);
   const [away, setAway] = useState(prediction ? prediction.away_score : 1);
   const [stake, setStake] = useState(prediction ? prediction.stake : 20);
@@ -793,10 +756,6 @@ function MatchCard({ match, prediction, locked, canSave, onSave, saving, maxStak
             </div>
           )}
         </div>
-      ) : !canSave ? (
-        <div style={{ textAlign: 'center' }}>
-          <Badge tone="default">Opt in above to save picks</Badge>
-        </div>
       ) : (
         <>
           {overBudget && (
@@ -829,8 +788,6 @@ function FixturesTab({ profile }) {
   const [savingId, setSavingId] = useState(null);
   const [msg, setMsg] = useState('');
   const [selectedGw, setSelectedGw] = useState(null);
-  const [optedIn, setOptedIn] = useState(false);
-  const [optInBusy, setOptInBusy] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -879,44 +836,7 @@ function FixturesTab({ profile }) {
     })();
   }, [gwMatches, profile]);
 
-  useEffect(() => {
-    if (selectedGw == null || !profile) return;
-    (async () => {
-      const { data } = await supabase
-        .from('gameweek_entries')
-        .select('gameweek')
-        .eq('user_id', profile.id)
-        .eq('gameweek', selectedGw)
-        .maybeSingle();
-      setOptedIn(!!data);
-    })();
-  }, [selectedGw, profile]);
-
-  const toggleOptIn = async () => {
-    if (!profile || selectedGw == null) return;
-    setOptInBusy(true);
-    setMsg('');
-    if (optedIn) {
-      const { error } = await supabase
-        .from('gameweek_entries')
-        .delete()
-        .eq('user_id', profile.id)
-        .eq('gameweek', selectedGw);
-      if (error) setMsg(`Error: ${error.message}`);
-      else setOptedIn(false);
-    } else {
-      const { error } = await supabase.from('gameweek_entries').insert({ user_id: profile.id, gameweek: selectedGw });
-      if (error) setMsg(`Error: ${error.message}`);
-      else setOptedIn(true);
-    }
-    setOptInBusy(false);
-  };
-
   const savePick = async (match, pick) => {
-    if (!optedIn) {
-      setMsg("Error: Opt in to this Gameweek above before saving picks.");
-      return;
-    }
     const otherStaked = totalStaked - (predictions[match.id]?.stake || 0);
     if (otherStaked + pick.stake > WEEKLY_STAKE_BUDGET) {
       setMsg(`Error: That would put you over your ${WEEKLY_STAKE_BUDGET}-point weekly budget.`);
@@ -972,28 +892,15 @@ function FixturesTab({ profile }) {
         wins half, wrong pays it back out of your total.
       </div>
 
-      <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontWeight: 700, marginBottom: 2 }}>I am playing this Gameweek</div>
-          <div style={st.sub}>
-            Opt in to save picks for Gameweek {selectedGw} — your picks won't count towards results or the leaderboard
-            otherwise.
-          </div>
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>Weekly Stake Budget</div>
+          <div style={st.sub}>Spread up to {WEEKLY_STAKE_BUDGET} points across as many fixtures as you like (max 50 per match).</div>
         </div>
-        <ToggleSwitch checked={optedIn} disabled={optInBusy || locked} onChange={toggleOptIn} />
+        <div style={{ fontSize: 20, fontWeight: 800, color: budgetLeft < 0 ? C.danger : C.accent, whiteSpace: 'nowrap' }}>
+          {Math.max(budgetLeft, 0)} / {WEEKLY_STAKE_BUDGET} left
+        </div>
       </div>
-
-      {optedIn && (
-        <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 2 }}>Weekly Stake Budget</div>
-            <div style={st.sub}>Spread up to {WEEKLY_STAKE_BUDGET} points across as many fixtures as you like (max 50 per match).</div>
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: budgetLeft < 0 ? C.danger : C.accent, whiteSpace: 'nowrap' }}>
-            {Math.max(budgetLeft, 0)} / {WEEKLY_STAKE_BUDGET} left
-          </div>
-        </div>
-      )}
 
       {msg && <div style={msg.startsWith('Error') ? st.errorBox : st.okBox}>{msg}</div>}
       {!gwMatches.length && <div style={st.sub}>No fixtures scheduled for this gameweek yet.</div>}
@@ -1003,7 +910,6 @@ function FixturesTab({ profile }) {
           match={m}
           prediction={predictions[m.id]}
           locked={locked}
-          canSave={optedIn}
           saving={savingId === m.id}
           onSave={savePick}
           maxStake={Math.min(50, WEEKLY_STAKE_BUDGET - (totalStaked - (predictions[m.id]?.stake || 0)))}
@@ -1052,17 +958,15 @@ function ResultsTab({ profile }) {
       setGwMatches(gm);
       const ids = gm.map((m) => m.id);
       if (ids.length) {
-        const [{ data: res }, { data: preds }, { data: profs }, { data: entries }] = await Promise.all([
+        const [{ data: res }, { data: preds }, { data: profs }] = await Promise.all([
           supabase.from('results').select('*').in('match_id', ids),
           supabase.from('predictions').select('*').in('match_id', ids),
           supabase.from('profiles').select('id, username'),
-          supabase.from('gameweek_entries').select('user_id').eq('gameweek', selectedGw),
         ]);
         const resMap = {};
         (res || []).forEach((r) => (resMap[r.match_id] = r));
         setResults(resMap);
-        const optedInIds = new Set((entries || []).map((e) => e.user_id));
-        setAllPreds((preds || []).filter((p) => optedInIds.has(p.user_id)));
+        setAllPreds(preds || []);
         const profMap = {};
         (profs || []).forEach((p) => (profMap[p.id] = p.username));
         setProfiles(profMap);
@@ -1261,9 +1165,10 @@ function RulesTab() {
     <div>
       <div style={st.h1}>How to Play</div>
       <Rule title="⚽ Match Predictions">
-        For every fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points. You have a budget of
-        100 points to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any
-        single match.
+        Every registered player automatically competes in every gameweek — there's no opt-in required. For every
+        fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points. You have a budget of 100 points
+        to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any single
+        match.
         <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
           <li>Exact score correct → win your full stake.</li>
           <li>Correct result only (right winner or draw, wrong score) → win half your stake.</li>
@@ -1654,58 +1559,6 @@ function AdminUsers({ session }) {
   );
 }
 
-function AdminGameweekOptIns() {
-  const [counts, setCounts] = useState({});
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [{ data: entries }, { count }] = await Promise.all([
-        supabase.from('gameweek_entries').select('gameweek'),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-      ]);
-      const map = {};
-      (entries || []).forEach((e) => {
-        map[e.gameweek] = (map[e.gameweek] || 0) + 1;
-      });
-      setCounts(map);
-      setTotalUsers(count || 0);
-      setLoading(false);
-    })();
-  }, []);
-
-  if (loading) return <Spinner />;
-
-  return (
-    <div>
-      <div style={{ ...st.sub, marginBottom: 12 }}>
-        Players who have opted in ("I am playing this Gameweek") per gameweek, out of {totalUsers} total players.
-      </div>
-      <div style={st.card}>
-        {ALL_GAMEWEEKS.map((gw) => (
-          <div
-            key={gw}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '8px 0',
-              borderBottom: gw < 38 ? `1px solid ${C.border}` : 'none',
-            }}
-          >
-            <span style={{ fontWeight: 700 }}>Gameweek {gw}</span>
-            <Badge tone={counts[gw] ? 'accent' : 'default'}>
-              {counts[gw] || 0} / {totalUsers}
-            </Badge>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function AdminPanel({ session }) {
   const [sub, setSub] = useState('results');
   const [allMatches, setAllMatches] = useState([]);
@@ -1724,7 +1577,6 @@ function AdminPanel({ session }) {
     { key: 'matches', label: 'Edit Matches' },
     { key: 'points', label: 'Adjust Points' },
     { key: 'users', label: 'Users' },
-    { key: 'optins', label: 'Gameweek Opt-Ins' },
   ];
 
   return (
@@ -1755,7 +1607,6 @@ function AdminPanel({ session }) {
       {sub === 'matches' && <AdminEditMatches allMatches={allMatches} reload={loadMatches} />}
       {sub === 'points' && <AdminAdjustPoints allMatches={allMatches} reload={loadMatches} />}
       {sub === 'users' && <AdminUsers session={session} />}
-      {sub === 'optins' && <AdminGameweekOptIns />}
     </div>
   );
 }

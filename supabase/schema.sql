@@ -3,13 +3,17 @@
 
 -- =========================================================
 -- REMOVED FEATURES
--- Pre-Season Picks was removed; drop its tables/function so re-running
--- this file on an existing database cleans them up too.
+-- Pre-Season Picks and the gameweek opt-in requirement were removed;
+-- drop their tables/functions so re-running this file on an existing
+-- database cleans them up too. Every registered user now automatically
+-- competes in every gameweek.
 -- =========================================================
 
 drop table if exists public.tournament_predictions cascade;
 drop table if exists public.tournament_results cascade;
 drop function if exists public.preseason_locked();
+drop table if exists public.gameweek_entries cascade;
+drop function if exists public.opted_in(int);
 
 -- =========================================================
 -- TABLES
@@ -69,19 +73,6 @@ create table if not exists public.points_adjustments (
   created_at timestamptz not null default now()
 );
 
--- A user's opt-in declaration ("I am playing this Gameweek") for a given
--- gameweek. Presence of a row = opted in. Users not opted in to a
--- gameweek are excluded from that gameweek's results view and leaderboard
--- contribution (see get_leaderboard() and the app's ResultsTab).
-create table if not exists public.gameweek_entries (
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  gameweek int not null,
-  created_at timestamptz not null default now(),
-  primary key (user_id, gameweek)
-);
-
-create index if not exists gameweek_entries_gameweek_idx on public.gameweek_entries (gameweek);
-
 -- =========================================================
 -- NEW-USER TRIGGER
 -- Reads username / is_admin out of the signUp() metadata payload
@@ -134,20 +125,6 @@ stable
 set search_path = public
 as $$
   select now() >= ((select min(kickoff) from public.matches where gameweek = gw) - interval '1 hour');
-$$;
-
--- Has the current user opted in ("I am playing this Gameweek") to gw?
-create or replace function public.opted_in(gw int)
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select exists (
-    select 1 from public.gameweek_entries
-    where user_id = auth.uid() and gameweek = gw
-  );
 $$;
 
 -- =========================================================
@@ -216,7 +193,6 @@ as $$
       ) as pts
     from public.predictions pr
     join public.results r on r.match_id = pr.match_id
-    join public.gameweek_entries ge on ge.user_id = pr.user_id and ge.gameweek = pr.gameweek
     group by pr.user_id
   ) mp on mp.user_id = p.id
   left join (
@@ -236,7 +212,6 @@ alter table public.matches enable row level security;
 alter table public.results enable row level security;
 alter table public.predictions enable row level security;
 alter table public.points_adjustments enable row level security;
-alter table public.gameweek_entries enable row level security;
 
 -- profiles: anyone signed in can read usernames (needed for leaderboard /
 -- shared picks); a user can edit their own row, admins can edit anyone's.
@@ -289,8 +264,6 @@ create policy "predictions_select" on public.predictions
   for select to authenticated
   using (user_id = auth.uid() or public.gameweek_locked(gameweek) or public.is_admin());
 
--- A user must have opted in to a gameweek ("I am playing this Gameweek")
--- before they can save predictions for it.
 drop policy if exists "predictions_insert" on public.predictions;
 create policy "predictions_insert" on public.predictions
   for insert to authenticated
@@ -298,7 +271,6 @@ create policy "predictions_insert" on public.predictions
     user_id = auth.uid()
     and gameweek = public.match_gameweek(match_id)
     and not public.gameweek_locked(public.match_gameweek(match_id))
-    and public.opted_in(public.match_gameweek(match_id))
   );
 
 drop policy if exists "predictions_update" on public.predictions;
@@ -309,7 +281,6 @@ create policy "predictions_update" on public.predictions
     user_id = auth.uid()
     and gameweek = public.match_gameweek(match_id)
     and not public.gameweek_locked(public.match_gameweek(match_id))
-    and public.opted_in(public.match_gameweek(match_id))
   );
 
 -- points_adjustments: a user can see their own adjustments, admins see + manage all.
@@ -320,21 +291,3 @@ create policy "points_adjustments_select" on public.points_adjustments
 drop policy if exists "points_adjustments_write" on public.points_adjustments;
 create policy "points_adjustments_write" on public.points_adjustments
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
-
--- gameweek_entries: everyone signed in can read entries (needed so
--- Previous Results / the leaderboard RPC can exclude non-opted-in users,
--- and so admins can see opt-in counts); a user manages their own opt-in
--- while that gameweek is still open, admins can manage anyone's.
-drop policy if exists "gameweek_entries_select" on public.gameweek_entries;
-create policy "gameweek_entries_select" on public.gameweek_entries
-  for select to authenticated using (true);
-
-drop policy if exists "gameweek_entries_insert" on public.gameweek_entries;
-create policy "gameweek_entries_insert" on public.gameweek_entries
-  for insert to authenticated
-  with check ((user_id = auth.uid() and not public.gameweek_locked(gameweek)) or public.is_admin());
-
-drop policy if exists "gameweek_entries_delete" on public.gameweek_entries;
-create policy "gameweek_entries_delete" on public.gameweek_entries
-  for delete to authenticated
-  using ((user_id = auth.uid() and not public.gameweek_locked(gameweek)) or public.is_admin());
