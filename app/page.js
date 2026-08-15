@@ -1270,10 +1270,16 @@ function RulesTab() {
         100 points to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any
         single match.
         <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-          <li>Exact score correct → win your full stake.</li>
-          <li>Correct result only (right winner or draw, wrong score) → win half your stake.</li>
-          <li>Wrong result → lose your stake (deducted from your running total).</li>
+          <li>Exact score correct → your total goes up by your full stake.</li>
+          <li>Correct result only (right winner or draw, wrong score) → your total goes up by half your stake.</li>
+          <li>Wrong result → your total goes down by your full stake.</li>
         </ul>
+        <div style={{ marginTop: 10 }}>
+          Staking itself doesn't cost you anything up front — your budget is just a cap on how much you're allowed
+          to risk that gameweek. Nothing moves on the leaderboard until a result comes in, and the stake is the net
+          swing itself (not a bet you get back on top of separate winnings): stake 10 and predict the exact score,
+          you're +10; correct result only, you're +5; wrong, you're -10.
+        </div>
       </Rule>
       <Rule title="🔒 Lockout">
         All predictions for a gameweek lock 1 hour before the first match of that gameweek kicks off. After lockout
