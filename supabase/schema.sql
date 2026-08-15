@@ -2,6 +2,16 @@
 -- Safe to re-run: drops and recreates functions/policies, but NOT tables (guarded by IF NOT EXISTS).
 
 -- =========================================================
+-- REMOVED FEATURES
+-- Pre-Season Picks was removed; drop its tables/function so re-running
+-- this file on an existing database cleans them up too.
+-- =========================================================
+
+drop table if exists public.tournament_predictions cascade;
+drop table if exists public.tournament_results cascade;
+drop function if exists public.preseason_locked();
+
+-- =========================================================
 -- TABLES
 -- =========================================================
 
@@ -36,6 +46,10 @@ create table if not exists public.predictions (
   match_id bigint not null references public.matches(id) on delete cascade,
   home_score int not null check (home_score >= 0),
   away_score int not null check (away_score >= 0),
+  -- Per-match cap (max 50). The aggregate weekly cap (100, across all of a
+  -- user's matches in a gameweek) is enforced by the
+  -- enforce_weekly_stake_budget() trigger below, since a plain check
+  -- constraint can't see other rows.
   stake int not null check (stake in (10, 20, 30, 40, 50)),
   gameweek int not null,
   created_at timestamptz not null default now(),
@@ -45,23 +59,6 @@ create table if not exists public.predictions (
 
 create index if not exists predictions_gameweek_idx on public.predictions (gameweek);
 create index if not exists predictions_match_idx on public.predictions (match_id);
-
-create table if not exists public.tournament_predictions (
-  user_id uuid primary key references public.profiles(id) on delete cascade,
-  pl_winner text,
-  bottom_team text,
-  top_scorer text,
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists public.tournament_results (
-  id int primary key default 1 check (id = 1),
-  pl_winner text,
-  bottom_team text,
-  top_scorer text,
-  top_scorer_goals int,
-  updated_at timestamptz not null default now()
-);
 
 create table if not exists public.points_adjustments (
   id bigint generated always as identity primary key,
@@ -153,19 +150,45 @@ as $$
   );
 $$;
 
--- Pre-season picks lock 1 hour before the very first match of the season.
-create or replace function public.preseason_locked()
-returns boolean
-language sql
-stable
+-- =========================================================
+-- WEEKLY STAKE BUDGET
+-- A user may stake at most 100 points total across all matches in a single
+-- gameweek (spread across as many fixtures as they like); each individual
+-- match is still capped at 50 by the `predictions.stake` check constraint.
+-- A plain check constraint can't see other rows, so this is enforced with
+-- a trigger that sums the user's other stakes for the gameweek.
+-- =========================================================
+
+create or replace function public.enforce_weekly_stake_budget()
+returns trigger
+language plpgsql
 set search_path = public
 as $$
-  select now() >= ((select min(kickoff) from public.matches) - interval '1 hour');
+declare
+  other_total int;
+begin
+  select coalesce(sum(stake), 0) into other_total
+  from public.predictions
+  where user_id = new.user_id
+    and gameweek = new.gameweek
+    and id is distinct from new.id;
+
+  if other_total + new.stake > 100 then
+    raise exception 'Weekly stake budget exceeded: % already staked + % > 100', other_total, new.stake;
+  end if;
+
+  return new;
+end;
 $$;
+
+drop trigger if exists predictions_weekly_budget on public.predictions;
+create trigger predictions_weekly_budget
+  before insert or update on public.predictions
+  for each row execute procedure public.enforce_weekly_stake_budget();
 
 -- =========================================================
 -- LEADERBOARD RPC
--- Running total = match points (+/-) + pre-season bonus + manual adjustments.
+-- Running total = match points (+/-) + manual adjustments.
 -- Computed live on every call, so entering a result immediately updates it.
 -- =========================================================
 
@@ -179,7 +202,7 @@ as $$
   select
     p.id as user_id,
     p.username,
-    (coalesce(mp.pts, 0) + coalesce(pp.pts, 0) + coalesce(ap.pts, 0)) as total_points
+    (coalesce(mp.pts, 0) + coalesce(ap.pts, 0)) as total_points
   from public.profiles p
   left join (
     select
@@ -197,17 +220,6 @@ as $$
     group by pr.user_id
   ) mp on mp.user_id = p.id
   left join (
-    select
-      tp.user_id,
-      (
-        coalesce(case when tr.pl_winner is not null and tp.pl_winner = tr.pl_winner then 50 else 0 end, 0)
-        + coalesce(case when tr.bottom_team is not null and tp.bottom_team = tr.bottom_team then 50 else 0 end, 0)
-        + coalesce(case when tr.top_scorer is not null and tp.top_scorer = tr.top_scorer then 50 + coalesce(tr.top_scorer_goals, 0) else 0 end, 0)
-      ) as pts
-    from public.tournament_predictions tp
-    left join public.tournament_results tr on tr.id = 1
-  ) pp on pp.user_id = p.id
-  left join (
     select user_id, sum(points) as pts from public.points_adjustments group by user_id
   ) ap on ap.user_id = p.id
   order by total_points desc nulls last, p.username asc;
@@ -223,8 +235,6 @@ alter table public.profiles enable row level security;
 alter table public.matches enable row level security;
 alter table public.results enable row level security;
 alter table public.predictions enable row level security;
-alter table public.tournament_predictions enable row level security;
-alter table public.tournament_results enable row level security;
 alter table public.points_adjustments enable row level security;
 alter table public.gameweek_entries enable row level security;
 
@@ -301,31 +311,6 @@ create policy "predictions_update" on public.predictions
     and not public.gameweek_locked(public.match_gameweek(match_id))
     and public.opted_in(public.match_gameweek(match_id))
   );
-
--- tournament_predictions: same shape, locked by kickoff of the season.
-drop policy if exists "tournament_predictions_select" on public.tournament_predictions;
-create policy "tournament_predictions_select" on public.tournament_predictions
-  for select to authenticated
-  using (user_id = auth.uid() or public.preseason_locked() or public.is_admin());
-
-drop policy if exists "tournament_predictions_insert" on public.tournament_predictions;
-create policy "tournament_predictions_insert" on public.tournament_predictions
-  for insert to authenticated
-  with check (user_id = auth.uid() and not public.preseason_locked());
-
-drop policy if exists "tournament_predictions_update" on public.tournament_predictions;
-create policy "tournament_predictions_update" on public.tournament_predictions
-  for update to authenticated
-  using (user_id = auth.uid() and not public.preseason_locked());
-
--- tournament_results: readable by everyone signed in, writable only by admins.
-drop policy if exists "tournament_results_select" on public.tournament_results;
-create policy "tournament_results_select" on public.tournament_results
-  for select to authenticated using (true);
-
-drop policy if exists "tournament_results_write" on public.tournament_results;
-create policy "tournament_results_write" on public.tournament_results
-  for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- points_adjustments: a user can see their own adjustments, admins see + manage all.
 drop policy if exists "points_adjustments_select" on public.points_adjustments;

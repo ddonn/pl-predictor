@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { INVITE_CODE, ADMIN_CODE, STAKE_OPTIONS, PL_TEAMS } from '../lib/constants';
+import { INVITE_CODE, ADMIN_CODE, STAKE_OPTIONS, WEEKLY_STAKE_BUDGET } from '../lib/constants';
 
 // =====================================================================
 // STYLE TOKENS
@@ -184,12 +184,6 @@ function gameweekLockTime(matches, gw) {
   return new Date(earliest - 60 * 60 * 1000);
 }
 
-function seasonLockTime(matches) {
-  if (!matches.length) return null;
-  const earliest = Math.min(...matches.map((m) => new Date(m.kickoff).getTime()));
-  return new Date(earliest - 60 * 60 * 1000);
-}
-
 function isPast(dateObj) {
   return !!dateObj && Date.now() >= dateObj.getTime();
 }
@@ -302,31 +296,34 @@ function NumberStepper({ value, onChange, disabled, label }) {
   );
 }
 
-function StakeSelector({ value, onChange, disabled }) {
+function StakeSelector({ value, onChange, disabled, maxStake }) {
   return (
     <div>
       <div style={{ fontSize: 14, color: C.sub, marginBottom: 6, fontWeight: 700 }}>STAKE</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-        {STAKE_OPTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(s)}
-            style={{
-              minHeight: 44,
-              borderRadius: 10,
-              fontWeight: 800,
-              fontSize: 14,
-              border: `1px solid ${value === s ? C.accent : C.border}`,
-              background: value === s ? 'rgba(0,208,132,0.18)' : C.bg2,
-              color: value === s ? C.accent : C.text,
-              opacity: disabled ? 0.5 : 1,
-            }}
-          >
-            {s}
-          </button>
-        ))}
+        {STAKE_OPTIONS.map((s) => {
+          const overBudget = maxStake != null && s > maxStake;
+          return (
+            <button
+              key={s}
+              type="button"
+              disabled={disabled || overBudget}
+              onClick={() => onChange(s)}
+              style={{
+                minHeight: 44,
+                borderRadius: 10,
+                fontWeight: 800,
+                fontSize: 14,
+                border: `1px solid ${value === s ? C.accent : C.border}`,
+                background: value === s ? 'rgba(0,208,132,0.18)' : C.bg2,
+                color: value === s ? C.accent : C.text,
+                opacity: disabled || overBudget ? 0.5 : 1,
+              }}
+            >
+              {s}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -743,11 +740,13 @@ function NavBar({ tabs, active, onChange, variant }) {
 // FIXTURES TAB
 // =====================================================================
 
-function MatchCard({ match, prediction, locked, canSave, onSave, saving }) {
+function MatchCard({ match, prediction, locked, canSave, onSave, saving, maxStake }) {
   const [home, setHome] = useState(prediction ? prediction.home_score : 1);
   const [away, setAway] = useState(prediction ? prediction.away_score : 1);
   const [stake, setStake] = useState(prediction ? prediction.stake : 20);
   const [dirty, setDirty] = useState(false);
+
+  const overBudget = maxStake != null && stake > maxStake;
 
   useEffect(() => {
     if (prediction) {
@@ -783,7 +782,7 @@ function MatchCard({ match, prediction, locked, canSave, onSave, saving }) {
         <NumberStepper value={away} onChange={update(setAway)} disabled={locked} label={match.away.slice(0, 3).toUpperCase()} />
       </div>
       <div style={{ marginBottom: 12 }}>
-        <StakeSelector value={stake} onChange={update(setStake)} disabled={locked} />
+        <StakeSelector value={stake} onChange={update(setStake)} disabled={locked} maxStake={maxStake} />
       </div>
       {locked ? (
         <div style={{ textAlign: 'center' }}>
@@ -799,16 +798,23 @@ function MatchCard({ match, prediction, locked, canSave, onSave, saving }) {
           <Badge tone="default">Opt in above to save picks</Badge>
         </div>
       ) : (
-        <Button
-          fullWidth
-          disabled={!dirty || saving}
-          onClick={() => {
-            onSave(match, { home_score: home, away_score: away, stake });
-            setDirty(false);
-          }}
-        >
-          {saving ? 'Saving…' : prediction ? 'Update Pick' : 'Save Pick'}
-        </Button>
+        <>
+          {overBudget && (
+            <div style={{ ...st.sub, color: C.danger, textAlign: 'center', marginBottom: 8 }}>
+              Only {Math.max(maxStake, 0)} points left in your weekly budget — lower this stake to save.
+            </div>
+          )}
+          <Button
+            fullWidth
+            disabled={!dirty || saving || overBudget}
+            onClick={() => {
+              onSave(match, { home_score: home, away_score: away, stake });
+              setDirty(false);
+            }}
+          >
+            {saving ? 'Saving…' : prediction ? 'Update Pick' : 'Save Pick'}
+          </Button>
+        </>
       )}
     </div>
   );
@@ -852,6 +858,12 @@ function FixturesTab({ profile }) {
   );
   const lockTime = useMemo(() => (selectedGw == null ? null : gameweekLockTime(matches, selectedGw)), [matches, selectedGw]);
   const locked = isPast(lockTime);
+
+  const totalStaked = useMemo(
+    () => Object.values(predictions).reduce((sum, p) => sum + p.stake, 0),
+    [predictions]
+  );
+  const budgetLeft = WEEKLY_STAKE_BUDGET - totalStaked;
 
   useEffect(() => {
     if (!gwMatches.length || !profile) {
@@ -903,6 +915,11 @@ function FixturesTab({ profile }) {
   const savePick = async (match, pick) => {
     if (!optedIn) {
       setMsg("Error: Opt in to this Gameweek above before saving picks.");
+      return;
+    }
+    const otherStaked = totalStaked - (predictions[match.id]?.stake || 0);
+    if (otherStaked + pick.stake > WEEKLY_STAKE_BUDGET) {
+      setMsg(`Error: That would put you over your ${WEEKLY_STAKE_BUDGET}-point weekly budget.`);
       return;
     }
     setSavingId(match.id);
@@ -966,6 +983,18 @@ function FixturesTab({ profile }) {
         <ToggleSwitch checked={optedIn} disabled={optInBusy || locked} onChange={toggleOptIn} />
       </div>
 
+      {optedIn && (
+        <div style={{ ...st.card, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>Weekly Stake Budget</div>
+            <div style={st.sub}>Spread up to {WEEKLY_STAKE_BUDGET} points across as many fixtures as you like (max 50 per match).</div>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: budgetLeft < 0 ? C.danger : C.accent, whiteSpace: 'nowrap' }}>
+            {Math.max(budgetLeft, 0)} / {WEEKLY_STAKE_BUDGET} left
+          </div>
+        </div>
+      )}
+
       {msg && <div style={msg.startsWith('Error') ? st.errorBox : st.okBox}>{msg}</div>}
       {!gwMatches.length && <div style={st.sub}>No fixtures scheduled for this gameweek yet.</div>}
       {gwMatches.map((m) => (
@@ -977,6 +1006,7 @@ function FixturesTab({ profile }) {
           canSave={optedIn}
           saving={savingId === m.id}
           onSave={savePick}
+          maxStake={Math.min(50, WEEKLY_STAKE_BUDGET - (totalStaked - (predictions[m.id]?.stake || 0)))}
         />
       ))}
     </div>
@@ -1151,176 +1181,6 @@ function ResultsTab({ profile }) {
 }
 
 // =====================================================================
-// PRE-SEASON PICKS TAB
-// =====================================================================
-
-function PreSeasonTab({ profile }) {
-  const [matches, setMatches] = useState([]);
-  const [mine, setMine] = useState(null);
-  const [plWinner, setPlWinner] = useState('');
-  const [bottomTeam, setBottomTeam] = useState('');
-  const [topScorer, setTopScorer] = useState('');
-  const [tournamentResult, setTournamentResult] = useState(null);
-  const [everyone, setEveryone] = useState([]);
-  const [profiles, setProfiles] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
-
-  useEffect(() => {
-    (async () => {
-      const [{ data: m }, { data: own }, { data: tr }] = await Promise.all([
-        supabase.from('matches').select('id, kickoff'),
-        supabase.from('tournament_predictions').select('*').eq('user_id', profile.id).maybeSingle(),
-        supabase.from('tournament_results').select('*').eq('id', 1).maybeSingle(),
-      ]);
-      setMatches(m || []);
-      if (own) {
-        setMine(own);
-        setPlWinner(own.pl_winner || '');
-        setBottomTeam(own.bottom_team || '');
-        setTopScorer(own.top_scorer || '');
-      }
-      setTournamentResult(tr || null);
-      setLoading(false);
-    })();
-  }, [profile.id]);
-
-  const lockTime = useMemo(() => seasonLockTime(matches), [matches]);
-  const locked = isPast(lockTime);
-
-  useEffect(() => {
-    if (!locked) return;
-    (async () => {
-      const [{ data: all }, { data: profs }] = await Promise.all([
-        supabase.from('tournament_predictions').select('*'),
-        supabase.from('profiles').select('id, username'),
-      ]);
-      setEveryone(all || []);
-      const map = {};
-      (profs || []).forEach((p) => (map[p.id] = p.username));
-      setProfiles(map);
-    })();
-  }, [locked]);
-
-  const save = async () => {
-    setSaving(true);
-    setMsg('');
-    const payload = {
-      user_id: profile.id,
-      pl_winner: plWinner || null,
-      bottom_team: bottomTeam || null,
-      top_scorer: topScorer.trim() || null,
-      updated_at: new Date().toISOString(),
-    };
-    const { data, error } = await supabase
-      .from('tournament_predictions')
-      .upsert(payload, { onConflict: 'user_id' })
-      .select()
-      .single();
-    if (error) setMsg(`Error: ${error.message}`);
-    else {
-      setMine(data);
-      setMsg('Saved!');
-      setTimeout(() => setMsg(''), 2000);
-    }
-    setSaving(false);
-  };
-
-  const preseasonPoints = (pred) => {
-    if (!tournamentResult) return 0;
-    let pts = 0;
-    if (tournamentResult.pl_winner && pred.pl_winner === tournamentResult.pl_winner) pts += 50;
-    if (tournamentResult.bottom_team && pred.bottom_team === tournamentResult.bottom_team) pts += 50;
-    if (tournamentResult.top_scorer && pred.top_scorer === tournamentResult.top_scorer) {
-      pts += 50 + (tournamentResult.top_scorer_goals || 0);
-    }
-    return pts;
-  };
-
-  if (loading) return <Spinner />;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <div style={st.h1}>Pre-Season Picks</div>
-        <Badge tone={locked ? 'danger' : 'accent'}>{countdownText(lockTime)}</Badge>
-      </div>
-      <div style={{ ...st.sub, marginBottom: 16 }}>
-        PL Winner: 50pts if exactly right (a near-miss top-4 bonus may be added manually by the admin). Bottom Team:
-        50pts if exactly right (relegation near-miss handled the same way). Top Scorer: 50pts if correct, plus 1pt per
-        goal your pick actually scored.
-      </div>
-      {msg && <div style={msg.startsWith('Error') ? st.errorBox : st.okBox}>{msg}</div>}
-
-      <div style={st.card}>
-        <div style={{ marginBottom: 14 }}>
-          <label style={st.label}>Premier League Winner</label>
-          <select style={st.select} value={plWinner} onChange={(e) => setPlWinner(e.target.value)} disabled={locked}>
-            <option value="">Select a team…</option>
-            {PL_TEAMS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={st.label}>Bottom of the Table</label>
-          <select style={st.select} value={bottomTeam} onChange={(e) => setBottomTeam(e.target.value)} disabled={locked}>
-            <option value="">Select a team…</option>
-            {PL_TEAMS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ marginBottom: locked ? 0 : 16 }}>
-          <label style={st.label}>Top Scorer</label>
-          <input
-            style={st.input}
-            value={topScorer}
-            onChange={(e) => setTopScorer(e.target.value)}
-            placeholder="Player name"
-            disabled={locked}
-          />
-        </div>
-        {!locked && (
-          <Button fullWidth onClick={save} disabled={saving} style={{ marginTop: 16 }}>
-            {saving ? 'Saving…' : mine ? 'Update Picks' : 'Save Picks'}
-          </Button>
-        )}
-      </div>
-
-      {tournamentResult && mine && (
-        <div style={{ ...st.card, borderColor: C.accent }}>
-          <div style={st.h2}>Your Pre-Season Points</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>+{preseasonPoints(mine)}</div>
-        </div>
-      )}
-
-      {locked && everyone.length > 0 && (
-        <div style={st.card}>
-          <div style={st.h2}>Everyone's Picks</div>
-          {everyone.map((p) => (
-            <div key={p.user_id} style={{ padding: '8px 0', borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
-                {p.user_id === profile.id ? 'You' : profiles[p.user_id] || 'Player'}
-              </div>
-              <div style={{ fontSize: 14, color: C.sub }}>
-                Winner: {p.pl_winner || '—'} · Bottom: {p.bottom_team || '—'} · Top Scorer: {p.top_scorer || '—'}
-                {tournamentResult && <span style={{ color: C.accent, fontWeight: 700 }}> · +{preseasonPoints(p)}pts</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =====================================================================
 // LEADERBOARD TAB
 // =====================================================================
 
@@ -1401,7 +1261,9 @@ function RulesTab() {
     <div>
       <div style={st.h1}>How to Play</div>
       <Rule title="⚽ Match Predictions">
-        For every fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points.
+        For every fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points. You have a budget of
+        100 points to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any
+        single match.
         <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
           <li>Exact score correct → win your full stake.</li>
           <li>Correct result only (right winner or draw, wrong score) → win half your stake.</li>
@@ -1412,19 +1274,9 @@ function RulesTab() {
         All predictions for a gameweek lock 1 hour before the first match of that gameweek kicks off. After lockout
         you can see everyone else's picks for that round in Previous Results.
       </Rule>
-      <Rule title="🏆 Pre-Season Picks">
-        Before Gameweek 1 kicks off, predict the Premier League Winner, the team that finishes bottom of the table,
-        and the season's Top Scorer.
-        <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-          <li>PL Winner: 50pts if correct (a smaller bonus may be awarded manually for a top-4 finish).</li>
-          <li>Bottom Team: 50pts if correct (a smaller bonus may be awarded manually for relegation).</li>
-          <li>Top Scorer: 50pts if correct, plus 1pt for every goal your pick scores — regardless of whether they win the Golden Boot.</li>
-        </ul>
-        These also lock 1 hour before Gameweek 1's first kick-off.
-      </Rule>
       <Rule title="📊 Leaderboard">
-        Your running total is the sum of every match result (win, half-win or loss of your stake), your pre-season
-        bonus points, and any manual adjustments made by the admin.
+        Your running total is the sum of every match result (win, half-win or loss of your stake) and any manual
+        adjustments made by the admin.
       </Rule>
     </div>
   );
@@ -2021,7 +1873,6 @@ function ProfileTab({ profile, session }) {
 const BASE_TABS = [
   { key: 'fixtures', label: 'Fixtures', shortLabel: 'Fixtures', icon: '⚽' },
   { key: 'results', label: 'Previous Results', shortLabel: 'Results', icon: '📊' },
-  { key: 'preseason', label: 'Pre-Season Picks', shortLabel: 'Season', icon: '🏆' },
   { key: 'leaderboard', label: 'Leaderboard', shortLabel: 'Table', icon: '🥇' },
   { key: 'rules', label: 'Rules', shortLabel: 'Rules', icon: '📖' },
   { key: 'profile', label: 'Profile', shortLabel: 'Profile', icon: '👤' },
@@ -2101,7 +1952,6 @@ export default function Page() {
         </div>
         {activeTab === 'fixtures' && <FixturesTab profile={profile} />}
         {activeTab === 'results' && <ResultsTab profile={profile} />}
-        {activeTab === 'preseason' && <PreSeasonTab profile={profile} />}
         {activeTab === 'leaderboard' && <LeaderboardTab profile={profile} />}
         {activeTab === 'rules' && <RulesTab />}
         {activeTab === 'profile' && <ProfileTab profile={profile} session={session} />}

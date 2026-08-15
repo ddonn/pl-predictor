@@ -64,23 +64,15 @@ wipe existing matches/results/predictions and reseed from scratch.
 
 ## How scoring works
 
-- **Match predictions**: pick a scoreline and a stake (10/20/30/40/50). Exact score =
-  full stake, correct result only = half stake, wrong = stake deducted. Locks 1 hour
-  before the first match of that gameweek.
-- **Pre-season picks**: PL Winner, Bottom Team, Top Scorer — lock 1 hour before
-  Gameweek 1's first kickoff. Auto-scored: 50pts for an exact match on any of the
-  three (Top Scorer also gets +1pt per goal they actually scored, via
-  `tournament_results.top_scorer_goals`).
-- **Manual adjustments**: the schema's `tournament_results` table only stores the
-  single actual winner/bottom-team/top-scorer (as specified), not the full final
-  table. So the "20pts for top-4" and "20pts for relegated-but-not-last" near-miss
-  bonuses, and the per-goal bonus for a top-scorer pick who *wasn't* the actual top
-  scorer, aren't things the database can compute automatically — the admin enters
-  those by hand from the **Adjust Points** tab once the final table is known. This is
-  called out in the in-app Rules tab too.
+- **Match predictions**: pick a scoreline and a stake (10/20/30/40/50) per fixture, up
+  to a 100-point budget per gameweek spread across as many fixtures as you like (max
+  50 on any one match). Exact score = full stake, correct result only = half stake,
+  wrong = stake deducted. Locks 1 hour before the first match of that gameweek.
+- **Manual adjustments**: the admin can award or deduct arbitrary points from the
+  **Adjust Points** tab, e.g. for anything the database can't compute automatically.
 - **Leaderboard**: `get_leaderboard()` is a Postgres RPC that sums match points +
-  pre-season points + manual adjustments live, every time it's called — so entering a
-  result or adjustment updates it immediately, no caching step required.
+  manual adjustments live, every time it's called — so entering a result or
+  adjustment updates it immediately, no caching step required.
 
 ## Project structure
 
