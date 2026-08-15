@@ -703,7 +703,7 @@ function NavBar({ tabs, active, onChange, variant }) {
 // FIXTURES TAB
 // =====================================================================
 
-function MatchCard({ match, prediction, locked, onSave, saving, maxStake }) {
+function MatchCard({ match, prediction, locked, onSave, saving, onDelete, deleting, maxStake }) {
   const [home, setHome] = useState(prediction ? prediction.home_score : 1);
   const [away, setAway] = useState(prediction ? prediction.away_score : 1);
   const [stake, setStake] = useState(prediction ? prediction.stake : 20);
@@ -763,16 +763,23 @@ function MatchCard({ match, prediction, locked, onSave, saving, maxStake }) {
               Only {Math.max(maxStake, 0)} points left in your weekly budget — lower this stake to save.
             </div>
           )}
-          <Button
-            fullWidth
-            disabled={!dirty || saving || overBudget}
-            onClick={() => {
-              onSave(match, { home_score: home, away_score: away, stake });
-              setDirty(false);
-            }}
-          >
-            {saving ? 'Saving…' : prediction ? 'Update Pick' : 'Save Pick'}
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              disabled={!dirty || saving || overBudget}
+              style={{ flex: 1 }}
+              onClick={() => {
+                onSave(match, { home_score: home, away_score: away, stake });
+                setDirty(false);
+              }}
+            >
+              {saving ? 'Saving…' : prediction ? 'Update Pick' : 'Save Pick'}
+            </Button>
+            {prediction && (
+              <Button variant="danger" disabled={deleting} onClick={() => onDelete(match)} style={{ flex: '0 0 auto' }}>
+                {deleting ? 'Removing…' : 'Remove'}
+              </Button>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -786,6 +793,7 @@ function FixturesTab({ profile }) {
   const [predictions, setPredictions] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [msg, setMsg] = useState('');
   const [selectedGw, setSelectedGw] = useState(null);
 
@@ -868,6 +876,28 @@ function FixturesTab({ profile }) {
     setSavingId(null);
   };
 
+  const deletePick = async (match) => {
+    setDeletingId(match.id);
+    setMsg('');
+    const { error } = await supabase
+      .from('predictions')
+      .delete()
+      .eq('user_id', profile.id)
+      .eq('match_id', match.id);
+    if (error) {
+      setMsg(`Error: ${error.message}`);
+    } else {
+      setPredictions((prev) => {
+        const next = { ...prev };
+        delete next[match.id];
+        return next;
+      });
+      setMsg('Pick removed.');
+      setTimeout(() => setMsg(''), 2000);
+    }
+    setDeletingId(null);
+  };
+
   if (loading || selectedGw == null) return <Spinner />;
 
   return (
@@ -912,6 +942,8 @@ function FixturesTab({ profile }) {
           locked={locked}
           saving={savingId === m.id}
           onSave={savePick}
+          onDelete={deletePick}
+          deleting={deletingId === m.id}
           maxStake={Math.min(50, WEEKLY_STAKE_BUDGET - (totalStaked - (predictions[m.id]?.stake || 0)))}
         />
       ))}

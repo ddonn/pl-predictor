@@ -283,6 +283,13 @@ create policy "predictions_update" on public.predictions
     and not public.gameweek_locked(public.match_gameweek(match_id))
   );
 
+-- A user can drop their own pick for a match (to free up weekly budget for
+-- another fixture) while that gameweek is still open.
+drop policy if exists "predictions_delete" on public.predictions;
+create policy "predictions_delete" on public.predictions
+  for delete to authenticated
+  using (user_id = auth.uid() and not public.gameweek_locked(public.match_gameweek(match_id)));
+
 -- points_adjustments: a user can see their own adjustments, admins see + manage all.
 drop policy if exists "points_adjustments_select" on public.points_adjustments;
 create policy "points_adjustments_select" on public.points_adjustments
