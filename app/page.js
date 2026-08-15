@@ -1121,21 +1121,42 @@ function ResultsTab({ profile }) {
 // =====================================================================
 
 function LeaderboardTab({ profile }) {
+  const [matches, setMatches] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState('overall');
+  const [selectedGw, setSelectedGw] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('matches').select('id, gameweek, kickoff');
+      setMatches(data || []);
+    })();
+  }, []);
+
+  const currentGw = useMemo(() => getCurrentGameweek(matches), [matches]);
+
+  // Default weekly view: the previous gameweek's leaderboard until the
+  // current gameweek locks, then switch to showing the current gameweek.
+  useEffect(() => {
+    if (selectedGw != null || !matches.length) return;
+    const currentLocked = isPast(gameweekLockTime(matches, currentGw));
+    setSelectedGw(currentLocked ? currentGw : Math.max(currentGw - 1, 1));
+  }, [matches, currentGw, selectedGw]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase.rpc('get_leaderboard');
+    const { data, error } = await supabase.rpc(
+      'get_leaderboard',
+      mode === 'weekly' && selectedGw != null ? { gw: selectedGw } : {}
+    );
     if (!error) setRows(data || []);
     setLoading(false);
-  }, []);
+  }, [mode, selectedGw]);
 
   useEffect(() => {
-    load();
-  }, [load]);
-
-  if (loading) return <Spinner />;
+    if (mode === 'overall' || selectedGw != null) load();
+  }, [load, mode, selectedGw]);
 
   return (
     <div>
@@ -1145,39 +1166,87 @@ function LeaderboardTab({ profile }) {
           ↻ Refresh
         </Button>
       </div>
-      <div style={st.card}>
-        {rows.length === 0 && <div style={st.sub}>No players yet.</div>}
-        {rows.map((r, i) => {
-          const isMe = r.user_id === profile.id;
-          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
-          return (
-            <div
-              key={r.user_id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 4px',
-                borderBottom: i < rows.length - 1 ? `1px solid ${C.border}` : 'none',
-                background: isMe ? 'rgba(0,208,132,0.08)' : 'transparent',
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 26, textAlign: 'center', fontWeight: 800, color: C.sub, fontSize: 14 }}>
-                  {medal || `#${i + 1}`}
-                </div>
-                <div style={{ fontWeight: isMe ? 800 : 600, fontSize: 14.5 }}>
-                  {r.username} {isMe && <span style={{ color: C.accent }}>(you)</span>}
-                </div>
-              </div>
-              <div style={{ fontWeight: 800, fontSize: 16, color: Number(r.total_points) < 0 ? C.danger : C.text }}>
-                {r.total_points}
-              </div>
-            </div>
-          );
-        })}
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        {[
+          { key: 'overall', label: 'Overall' },
+          { key: 'weekly', label: 'Weekly' },
+        ].map((m) => (
+          <button
+            key={m.key}
+            onClick={() => setMode(m.key)}
+            style={{
+              minHeight: 44,
+              padding: '8px 14px',
+              borderRadius: 9,
+              border: `1px solid ${mode === m.key ? C.accent : C.border}`,
+              background: mode === m.key ? 'rgba(0,208,132,0.15)' : C.card,
+              color: mode === m.key ? C.accent : C.sub,
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
       </div>
+
+      {mode === 'weekly' && (
+        <div style={{ marginBottom: 14 }}>
+          <select
+            style={st.select}
+            value={selectedGw ?? ''}
+            onChange={(e) => setSelectedGw(Number(e.target.value))}
+          >
+            {ALL_GAMEWEEKS.map((gw) => (
+              <option key={gw} value={gw}>
+                Gameweek {gw}
+                {gw === currentGw ? ' (current)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {loading ? (
+        <Spinner />
+      ) : (
+        <div style={st.card}>
+          {rows.length === 0 && (
+            <div style={st.sub}>{mode === 'weekly' ? 'No scores for this gameweek yet.' : 'No players yet.'}</div>
+          )}
+          {rows.map((r, i) => {
+            const isMe = r.user_id === profile.id;
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null;
+            return (
+              <div
+                key={r.user_id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 4px',
+                  borderBottom: i < rows.length - 1 ? `1px solid ${C.border}` : 'none',
+                  background: isMe ? 'rgba(0,208,132,0.08)' : 'transparent',
+                  borderRadius: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 26, textAlign: 'center', fontWeight: 800, color: C.sub, fontSize: 14 }}>
+                    {medal || `#${i + 1}`}
+                  </div>
+                  <div style={{ fontWeight: isMe ? 800 : 600, fontSize: 14.5 }}>
+                    {r.username} {isMe && <span style={{ color: C.accent }}>(you)</span>}
+                  </div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: Number(r.total_points) < 0 ? C.danger : C.text }}>
+                  {r.total_points}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1197,10 +1266,9 @@ function RulesTab() {
     <div>
       <div style={st.h1}>How to Play</div>
       <Rule title="⚽ Match Predictions">
-        Every registered player automatically competes in every gameweek — there's no opt-in required. For every
-        fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points. You have a budget of 100 points
-        to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any single
-        match.
+        For every fixture, pick an exact scoreline and a stake of 10, 20, 30, 40 or 50 points. You have a budget of
+        100 points to stake per gameweek, spread across as many fixtures as you like — just not more than 50 on any
+        single match.
         <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
           <li>Exact score correct → win your full stake.</li>
           <li>Correct result only (right winner or draw, wrong score) → win half your stake.</li>
@@ -1212,8 +1280,9 @@ function RulesTab() {
         you can see everyone else's picks for that round in Previous Results.
       </Rule>
       <Rule title="📊 Leaderboard">
-        Your running total is the sum of every match result (win, half-win or loss of your stake) and any manual
-        adjustments made by the admin.
+        The Overall leaderboard is the sum of every match result (win, half-win or loss of your stake) and any
+        manual adjustments made by the admin. The Weekly leaderboard scores just that gameweek's matches (from -100
+        to +100) and decides that week's prize — use the gameweek picker to look up any week.
       </Rule>
     </div>
   );

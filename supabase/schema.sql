@@ -165,43 +165,59 @@ create trigger predictions_weekly_budget
 
 -- =========================================================
 -- LEADERBOARD RPC
--- Running total = match points (+/-) + manual adjustments.
--- Computed live on every call, so entering a result immediately updates it.
+-- Overall (gw is null) = match points (+/-) across every gameweek, plus
+-- manual adjustments. Weekly (gw given) = just that gameweek's match
+-- points, ranging -100..100 since that's the weekly stake budget — this
+-- is what decides that week's prize. Computed live on every call, so
+-- entering a result immediately updates it.
+--
+-- get_leaderboard() used to take no arguments; a default parameter
+-- creates a new overload rather than replacing that zero-arg signature,
+-- which would otherwise make bare calls ambiguous, so drop it explicitly.
 -- =========================================================
 
-create or replace function public.get_leaderboard()
+drop function if exists public.get_leaderboard();
+
+create or replace function public.get_leaderboard(gw int default null)
 returns table (user_id uuid, username text, total_points numeric)
 language sql
 stable
 security definer
 set search_path = public
 as $$
+  with match_pts as (
+    select
+      pr.user_id,
+      pr.gameweek,
+      case
+        when pr.home_score = r.home_score and pr.away_score = r.away_score then pr.stake
+        when sign(pr.home_score - pr.away_score) = sign(r.home_score - r.away_score) then pr.stake / 2.0
+        else -pr.stake
+      end as pts
+    from public.predictions pr
+    join public.results r on r.match_id = pr.match_id
+  )
   select
     p.id as user_id,
     p.username,
-    (coalesce(mp.pts, 0) + coalesce(ap.pts, 0)) as total_points
+    case
+      when gw is null then coalesce(mp.pts, 0) + coalesce(ap.pts, 0)
+      else coalesce(wp.pts, 0)
+    end as total_points
   from public.profiles p
   left join (
-    select
-      pr.user_id,
-      sum(
-        case
-          when pr.home_score = r.home_score and pr.away_score = r.away_score then pr.stake
-          when sign(pr.home_score - pr.away_score) = sign(r.home_score - r.away_score) then pr.stake / 2.0
-          else -pr.stake
-        end
-      ) as pts
-    from public.predictions pr
-    join public.results r on r.match_id = pr.match_id
-    group by pr.user_id
+    select user_id, sum(pts) as pts from match_pts group by user_id
   ) mp on mp.user_id = p.id
   left join (
     select user_id, sum(points) as pts from public.points_adjustments group by user_id
   ) ap on ap.user_id = p.id
+  left join (
+    select user_id, sum(pts) as pts from match_pts where gameweek = gw group by user_id
+  ) wp on wp.user_id = p.id
   order by total_points desc nulls last, p.username asc;
 $$;
 
-grant execute on function public.get_leaderboard() to authenticated;
+grant execute on function public.get_leaderboard(int) to authenticated;
 
 -- =========================================================
 -- ROW LEVEL SECURITY
