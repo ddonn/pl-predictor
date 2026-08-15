@@ -13,7 +13,7 @@ drop table if exists public.tournament_predictions cascade;
 drop table if exists public.tournament_results cascade;
 drop function if exists public.preseason_locked();
 drop table if exists public.gameweek_entries cascade;
-drop function if exists public.opted_in(int);
+drop function if exists public.opted_in(int) cascade;
 
 -- =========================================================
 -- TABLES
